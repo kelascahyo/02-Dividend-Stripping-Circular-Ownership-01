@@ -28,7 +28,7 @@ def load_graph_data():
     try:
         # Load masked dataset files
         nodes_df = pd.read_csv("nodes_masked.csv")
-        edges_df = pd.read_csv("edges_masked_part1.csv")
+        edges_df = pd.read_csv("edges_masked.csv")
         
         # Initialize Directed Graph via NetworkX
         G = nx.DiGraph()
