@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Circular Ownership D3 Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0e1117;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #chart {
+            width: 100vw;
+            height: 100vh;
+        }
+        .node {
+            stroke: #262730;
+            stroke-width: 2px;
+            cursor: pointer;
+        }
+        .link {
+            fill: none;
+            stroke-opacity: 0.7;
+            cursor: pointer;
+        }
+        .link-label {
+            font-size: 9px;
+            fill: #a3a8b4;
+            pointer-events: none;
+        }
+        .node-label {
+            font-size: 11px;
+            fill: #f1f3f6;
+            pointer-events: none;
+            text-shadow: 0px 1px 3px rgba(0,0,0,0.9);
+        }
+        #tooltip {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(28, 31, 46, 0.95);
+            border: 1px solid #ff4b4b;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 320px;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            pointer-events: none;
+            display: none;
+            line-height: 1.5;
+            z-index: 10;
+        }
+        .tooltip-title {
+            font-weight: bold;
+            color: #ff4b4b;
+            border-bottom: 1px solid #31354b;
+            padding-bottom: 5px;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .legend {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            background: rgba(28, 31, 46, 0.85);
+            border: 1px solid #31354b;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            pointer-events: none;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="tooltip"></div>
+    <div id="legend" class="legend">
+        <div style="font-weight: bold; margin-bottom: 5px; color:#ff4b4b;">Legend:</div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff3333;"></div>Circular/Cycle Edge</div>
+        <div class="legend-item"><div class="legend-color" style="background:#4a5568;"></div>Normal Edge</div>
+        <div class="legend-item"><div class="legend-color" style="background:#1f77b4;"></div>Badan (Company)</div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff7f0e;"></div>Orang Pribadi (Individual)</div>
+        <div class="legend-item"><div class="legend-color" style="background:#2ca02c;"></div>LN (Foreign Entity)</div>
+        <div class="legend-item"><div class="legend-color" style="background:#9467bd;"></div>Tanpa NPWP</div>
+        <div style="margin-top: 5px; font-size: 9px; color: #a3a8b4;">*Line thickness represents dividend / transaction value.</div>
+    </div>
+    
+    <div id="chart"></div>
+
+    <script>
+        // Data placeholder yang akan di-inject oleh Jinja2 dari Streamlit
+        const graphData = {{ graph_data_json | safe }};
+        
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Marker container untuk tanda panah berarah (directional arrow)
+        svg.append("defs").flatMap(d => ['normal', 'cycle']).toFormat;
+        
+        // Define marker untuk normal edge
+        svg.select("defs").append("marker")
+            .attr("id", "arrow-normal")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 22)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#4a5568");
+
+        // Define marker untuk cycle edge (Merah membara)
+        svg.select("defs").append("marker")
+            .attr("id", "arrow-cycle")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 22)
+            .attr("refY", 0)
+            .attr("markerWidth", 8)
+            .attr("markerHeight", 8)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "#ff1a1a");
+
+        // Group utama untuk mendukung fitur zoom dan pan
+        const gContainer = svg.append("g");
+
+        svg.call(d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on("zoom", (event) => {
+                gContainer.attr("transform", event.transform);
+            }));
+
+        // Skema pewarnaan rumpun tipe node
+        const colorMap = {
+            "Badan": "#1f77b4",
+            "Orang Pribadi": "#ff7f0e",
+            "LN": "#2ca02c",
+            "Tidak ada NPWP": "#9467bd"
+        };
+
+        // Pembuatan simulasi gaya fisik (Force Layout)
+        const simulation = d3.forceSimulation(graphData.nodes)
+            .force("link", d3.forceLink(graphData.links).id(d => d.id).distance(120))
+            .force("charge", d3.forceManyBody().strength(-250))
+            .force("center", d3.forceCenter(width / 2, height / 2))
+            .force("collision", d3.forceCollide().radius(25));
+
+        // Penggambaran garis relasi (Links)
+        const link = gContainer.append("g")
+            .selectAll("path")
+            .data(graphData.links)
+            .enter().append("path")
+            .attr("class", "link")
+            .attr("stroke", d => d.is_cycle ? "#ff1a1a" : "#4a5568")
+            .attr("stroke-width", d => d.stroke_width)
+            .attr("marker-end", d => d.is_cycle ? "url(#arrow-cycle)" : "url(#arrow-normal)");
+
+        // Penggambaran objek lingkaran Wajib Pajak (Nodes)
+        const node = gContainer.append("g")
+            .selectAll("circle")
+            .data(graphData.nodes)
+            .enter().append("circle")
+            .attr("class", "node")
+            .attr("r", d => d.is_in_cycle ? 10 : 7)
+            .attr("fill", d => d.is_in_cycle ? "#ff3333" : (colorMap[d.jenis_node] || "#7f7f7f"))
+            .style("box-shadow", d => d.is_in_cycle ? "0 0 12px #ff0000" : "none")
+            .call(d3.drag()
+                .on("start", dragstarted)
+                .on("drag", dragged)
+                .on("end", dragended));
+
+        // Label Nama pada Node
+        const labels = gContainer.append("g")
+            .selectAll("text")
+            .data(graphData.nodes)
+            .enter().append("text")
+            .attr("class", "node-label")
+            .attr("dx", 12)
+            .attr("dy", ".35em")
+            .text(d => d.nama);
+
+        // Interaksi Tooltip (Mouse Hover)
+        const tooltip = d3.select("#tooltip");
+
+        node.on("mouseover", function(event, d) {
+            tooltip.style("display", "block")
+                .html(`
+                    <div class="tooltip-title">${d.nama}</div>
+                    <b>Taxpayer ID (ID WP):</b> ${d.id}<br/>
+                    <b>Entity Type:</b> ${d.jenis_node}<br/>
+                    <b>Status:</b> ${d.is_in_cycle ? "<span style='color:#ff3333; font-weight:bold;'>⚠️ Flagged in Circular Loop</span>" : "<span style='color:#2ca02c;'>Normal / Clean</span>"}
+                `);
+            
+            // Highlight tetangga langsung
+            node.style("opacity", n => (n.id === d.id || graphData.links.some(l => (l.source.id === d.id && l.target.id === n.id) || (l.target.id === d.id && l.source.id === n.id))) ? 1 : 0.2);
+            link.style("opacity", l => (l.source.id === d.id || l.target.id === d.id) ? 1 : 0.1);
+        });
+
+        node.on("mouseout", function() {
+            tooltip.style("display", "none");
+            node.style("opacity", 1);
+            link.style("opacity", 0.7);
+        });
+
+        // Setiap langkah perubahan mekanis simulasi (Ticking Physics)
+        simulation.on("tick", () => {
+            // Menggambar garis lengkung tipis agar panah bolak-balik tidak bertubrukan secara linear
+            link.attr("d", d => {
+                const dx = d.target.x - d.source.x;
+                const dy = d.target.y - d.source.y;
+                const dr = Math.sqrt(dx * dx + dy * dy) * 1.5; // Kelengkungan garis
+                return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+            });
+
+            node.attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+
+            labels.attr("x", d => d.x)
+                .attr("y", d => d.y);
+        });
+
+        // Fungsi Drag Handler
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+    </script>
+</body>
+</html>
