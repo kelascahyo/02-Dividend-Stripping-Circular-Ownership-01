@@ -18,7 +18,7 @@ st.markdown("""
     h1, h2, h3 { color: #ff4b4b !important; }
     .stAlert p { color: #000000 !important; }
     </style>
-""", unsafe_allow_index=True)
+""", unsafe_allow_html=True)  # <-- Diubah menjadi unsafe_allow_html
 
 # --- FUNGSI LOAD DATA (DI-CACHE SUPAYA PERFORMA CEPAT) ---
 @st.cache_data
